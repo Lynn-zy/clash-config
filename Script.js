@@ -75,22 +75,20 @@ function main(config, profileName) {
     );
   };
 
-  // 本地客户端进程直连白名单（TUN 模式下按进程名放行直连）
-  // 背景：TUN 全局接管时，远控软件（信令/P2P打洞）与 BT/磁力下载（高并发/大流量 P2P）
-  //       若走代理会导致连接卡顿、打洞失败或迅速耗尽代理流量，且易触发机场封禁审计；
-  //       mihomo 在 Windows 下无法按进程排除 TUN 流量（exclude-uid/exclude-package 仅 Linux/Android 可用），
-  //       故通过 PROCESS-NAME 规则强制直连，等价于“排除指定进程代理”。
+  // 远程控制/远程桌面客户端直连白名单（TUN 模式下按进程名放行直连）
+  // 背景：TUN 全局接管时，这类客户端的信令与 P2P 打洞流量一旦被代理绕路，会出现
+  //       无法连接、画面卡顿、延迟飙高等问题；mihomo 在 Windows 下无法按进程排除
+  //       TUN 流量（exclude-uid/exclude-package 仅 Linux/Android 可用），故改用
+  //       PROCESS-NAME 规则让这些进程直连，效果等价于“排除代理”。
   // 说明：进程名须与可执行文件实际名称完全一致，可在「任务管理器 → 详细信息」中查看；
-  //       新增其它远控或下载客户端时按同样格式追加即可。
-  const directProcesses = [
+  //       新增其它远程控制软件（如向日葵、AnyDesk、RustDesk）时按同样格式追加即可。
+  const remoteControlDirectProcesses = [
     "ToDesk.exe", // ToDesk 主程序与后台服务（服务复用同一可执行文件）
     "zagent.exe", // ToDesk 辅助组件（位于 ToDesk 安装目录）
     "GameViewer.exe", // 网易 UU 远程主程序
     "GameViewerService.exe", // 网易 UU 远程后台服务
-    "BitComet.exe", // 比特彗星（BitComet）主程序
-    "BitComet_x64.exe", // 比特彗星 64 位兼容进程名（部分便携版/历史构建）
   ];
-  const processDirectRules = directProcesses.map(
+  const remoteControlRules = remoteControlDirectProcesses.map(
     (processName) => `PROCESS-NAME,${processName},DIRECT`,
   );
 
@@ -286,7 +284,7 @@ function main(config, profileName) {
 
   // 4. 按照科学严谨的优先级金字塔重新拼装全量规则
   //
-  // 【层级 0】客户端进程直连（PROCESS-NAME，涵盖远程控制、P2P/磁力下载等，先于一切规则，确保不被拦截集误伤、不被代理绕路）
+  // 【层级 0】远程控制客户端直连（PROCESS-NAME，先于一切规则，确保不被拦截集误伤、不被代理绕路）
   // 【层级 1】广告拦截与内网本地直连（RULE-SET,reject/applications/private）
   // 【层级 2】订阅与客户端自定义规则（保留客户端手动配置的置顶规则及原订阅 OpenAI、YouTube、Netflix 等原生专属分组）
   // 【层级 3】专精商业服务规则集（补充原订阅未涵盖的服务）
@@ -296,7 +294,7 @@ function main(config, profileName) {
   // 【层级 7】全局 GEOIP 直连（带 no-resolve 避免 fake-ip DNS 泄漏）
   // 【层级 8】全局最终保底（MATCH,Final）
   const assembledRules = [
-    ...processDirectRules,
+    ...remoteControlRules,
     ...highPriorityRules,
     ...cleanedOriginalRules,
     ...specificServiceRules,
@@ -317,7 +315,8 @@ function main(config, profileName) {
   });
 
   // 6. 动态增强 fake-ip 豁免：以订阅原生 fake-ip-filter 为基底，补齐通用兜底项
-  //    前提：dns_config.yaml 不声明 fake-ip-filter，订阅的值才能透传到这里
+  //    前提：dns_config.yaml 中 fake-ip-filter 必须留空。已填写的 DNS 字段归 App 所有，
+  //    会在本脚本之后被强制还原；只有留空，订阅的值才能透传到这里参与并集
   const dns = config.dns || {};
   if (dns["enhanced-mode"] === "fake-ip") {
     const baseFilter = Array.isArray(dns["fake-ip-filter"])
